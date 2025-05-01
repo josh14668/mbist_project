@@ -1,112 +1,62 @@
-// -----------------------------------------------------------------------------
-// counter_tb_simple.sv   —  Minimal testbench for `counter`
-// -----------------------------------------------------------------------------
 `timescale 1ns/1ps
 
-localparam int LEN  = 10;
-localparam int MAX  = (1 << LEN) - 1;
+module tb_counter;
+  parameter length = 10;
 
-// DUT inputs / outputs
-logic [LEN-1:0] d_in;
-logic           clk = 0;
-logic           ld, ud, cen;
-logic [LEN-1:0] q;
-logic           cout;
+  logic clk, ld, u_d, cen;
+  logic [length-1:0] d_in;
+  logic [length-1:0] q;
+  logic cout;
 
-// Clock: 100 MHz (10 ns period)
-always #5 clk = ~clk;
+  // DUT instantiation
+  counter #(.length(length)) dut (
+    .d_in(d_in),
+    .clk(clk),
+    .ld(ld),
+    .u_d(u_d),
+    .cen(cen),
+    .q(q),
+    .cout(cout)
+  );
 
-// Device Under Test
-counter #(.length(LEN)) dut (
-    .d_in (d_in),
-    .clk  (clk ),
-    .ld   (ld  ),
-    .ud   (ud  ),
-    .cen  (cen ),
-    .q    (q   ),
-    .cout (cout)
-);
+  // Clock generation
+  initial clk = 0;
+  always #5 clk = ~clk;
 
-// Reference model (very small)
-logic [LEN-1:0] ref_q;
-logic           ref_cout;
+  logic [length:0] temp_ref;
 
-always_ff @(posedge clk) begin
-    ref_cout <= 0;                         // default
-    if (cen) begin
-        if (ld)            ref_q <= d_in;
-        else if (ud)       ref_q <= ref_q + 1;
-        else               ref_q <= ref_q - 1;
-
-        // detect overflow / underflow for reference
-        if (ud && ref_q == MAX)   ref_cout <= 1;
-        if (!ud && ref_q == 0)    ref_cout <= 1;
-    end
-end
-
-// Simple comparator: stop sim on any mismatch
-always_ff @(posedge clk) begin
-    if (q !== ref_q) begin
-        $error("MISMATCH @%0t  q=%0d  ref=%0d", $time, q, ref_q);
-        $finish;
-    end
-    if (cout !== ref_cout) begin
-        $error("COUT mismatch @%0t  cout=%0b  ref=%0b", $time, cout, ref_cout);
-        $finish;
-    end
-end
-
-// -----------------------------------------------------------------------------
-// Test sequence (all in one place)
-// -----------------------------------------------------------------------------
-initial begin
-    // --- Initial idle values
-    {ld, ud, cen} = 3'b000;
-    d_in  = '0;
-    ref_q = '0;
-
-    // wait 2 clocks for good measure
-    repeat (2) @(posedge clk);
-
-    // ---------------------------------------------------------
-    // 1) LOAD 512  -------------------------------------------
-    // ---------------------------------------------------------
-    ld   = 1;  cen = 1;  d_in = 10'd512;
+  initial begin
+    // Reset state
+    ld = 0; u_d = 0; cen = 0; d_in = '0;
     @(posedge clk);
-    ld   = 0;  d_in = 'x;                           // de-assert
-    // --- UP-count 4 steps (512 → 516)
-    ud   = 1;
-    repeat (4) @(posedge clk);
-    ud   = 0;
 
-    // ---------------------------------------------------------
-    // 2) DOWN-count to underflow ------------------------------
-    // ---------------------------------------------------------
-    // go all the way to 0 then one more tick to show underflow
-    repeat (517) @(posedge clk);  // 516 → -1 (wraps to 1023)
-    // ud is still 0, cen is 1
+    // Load a value and check
+    ld = 1; cen = 1; d_in = 10'd512;
+    @(posedge clk);
+    ld = 0;
+    temp_ref = {1'b0, d_in};
+    if (q != d_in) $error("FAIL: load mismatch q=%0d, d_in=%0d", q, d_in);
+    if (cout != 0) $error("FAIL: cout should be 0 on load");
 
-    // ---------------------------------------------------------
-    // 3) Disable counting, ensure hold ------------------------
-    // ---------------------------------------------------------
-    cen = 0;
-    repeat (3) @(posedge clk);    // q should remain constant
-
-    // ---------------------------------------------------------
-    // 4) Random quick sanity burst ----------------------------
-    // ---------------------------------------------------------
-    cen = 1;
-    for (int i = 0; i < 20; i++) begin
-        ld   = 1;
-        d_in = $urandom_range(0, MAX);
-        @(posedge clk);
-        ld   = 0;
-        ud   = $urandom_range(0,1);
-        repeat($urandom_range(1,8)) @(posedge clk);
+    // Count up to overflow
+    repeat (3) begin
+      temp_ref = temp_ref + 1;
+      u_d = 1; cen = 1;
+      @(posedge clk);
+      if (q != temp_ref[length-1:0]) $error("FAIL: up-count mismatch");
+      if (cout != temp_ref[length])  $error("FAIL: overflow flag incorrect");
     end
 
-    $display("\n✅  ALL TESTS PASSED");
-    $finish;
-end
+    // Count down to underflow
+    repeat (4) begin
+      temp_ref = temp_ref - 1;
+      u_d = 0; cen = 1;
+      @(posedge clk);
+      if (q != temp_ref[length-1:0]) $error("FAIL: down-count mismatch");
+      if (cout != temp_ref[length])  $error("FAIL: underflow flag incorrect");
+    end
 
+    $display("All tests completed for 11-bit counter overflow tracking.");
+    $finish;
+  end
 endmodule

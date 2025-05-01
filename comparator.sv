@@ -4,8 +4,7 @@ module comparator #(parameter WIDTH = 8 )
     input  logic [WIDTH-1:0] ramout,
     output logic            gt, 
     output logic            eq,
-    output logic            lt,
-    ports
+    output logic            lt
 );
 
 always_comb begin

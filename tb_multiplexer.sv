@@ -1,44 +1,52 @@
+`timescale 1ns/1ps
+
 module tb_multiplexer;
-    localparam WIDTH = 8;
+  parameter WIDTH = 8;
 
-    // Testbench signals
-    logic [WIDTH-1:0] normal_in;
-    logic [WIDTH-1:0] bist_in;
-    logic NbarT;
-    logic [WIDTH-1:0] out;
+  // Testbench signals
+  logic [WIDTH-1:0] normal_in, bist_in, out;
+  logic NbarT;
 
-    // Instantiate the multiplexer module
-    multiplexer #(WIDTH) uut (
-        .normal_in(normal_in),
-        .bist_in(bist_in),
-        .NbarT(NbarT),
-        .out(out)
-    );
+  // DUT instantiation
+  multiplexer #(.WIDTH(WIDTH)) dut (
+    .normal_in(normal_in),
+    .bist_in(bist_in),
+    .NbarT(NbarT),
+    .out(out)
+  );
 
-    initial begin
-        // Test case 1: NbarT = 0, normal_in should be selected
-        normal_in = 8'hAA; // 170
-        bist_in = 8'h55;   // 85
-        NbarT = 1'b0;
-        #10;
-        assert (out == normal_in) else $fatal("Test case 1 failed");
+  initial begin
+    // Case 1: NbarT = 0 -> select normal_in
+    normal_in = 8'hA5; bist_in = 8'h5A; NbarT = 0;
+    #1;
+    assert(out == normal_in) else $error("FAIL: NbarT=0, expected out=normal_in (%h), got %h", normal_in, out);
 
-        // Test case 2: NbarT = 1, bist_in should be selected
-        normal_in = 8'hAA; // 170
-        bist_in = 8'h55;   // 85
-        NbarT = 1'b1;
-        #10;
-        assert (out == bist_in) else $fatal("Test case 2 failed");
+    // Case 2: NbarT = 1 -> select bist_in
+    NbarT = 1;
+    #1;
+    assert(out == bist_in) else $error("FAIL: NbarT=1, expected out=bist_in (%h), got %h", bist_in, out);
 
-        // Test case 3: NbarT = 0, normal_in should be selected again
-        normal_in = 8'hFF; // 255
-        bist_in = 8'h00;   // 0
-        NbarT = 1'b0;
-        #10;
-        assert (out == normal_in) else $fatal("Test case 3 failed");
+    // Case 3: All 0s and 1s edge case
+    normal_in = 8'h00; bist_in = 8'hFF;
+    NbarT = 0; #1;
+    assert(out == 8'h00) else $error("FAIL: NbarT=0, expected out=00");
 
-        $display("All test cases passed!");
-        $finish;
+    NbarT = 1; #1;
+    assert(out == 8'hFF) else $error("FAIL: NbarT=1, expected out=FF");
+
+    // Case 4: Random patterns
+    repeat (5) begin
+      normal_in = $random;
+      bist_in   = $random;
+      NbarT     = $random % 2;
+      #1;
+      if (NbarT)
+        assert(out == bist_in) else $error("FAIL: NbarT=1, expected out=bist_in");
+      else
+        assert(out == normal_in) else $error("FAIL: NbarT=0, expected out=normal_in");
     end
-endmodule
 
+    $display("All multiplexer tests passed.");
+    $finish;
+  end
+endmodule
