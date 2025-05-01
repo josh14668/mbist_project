@@ -1,52 +1,64 @@
-`timescale 1ns/1ps
-
 module tb_multiplexer;
-  parameter WIDTH = 8;
+  `define WIDTH  8
 
-  // Testbench signals
-  logic [WIDTH-1:0] normal_in, bist_in, out;
-  logic NbarT;
+  //------------------------------------------------------------------
+  // DUT interface signals
+  //------------------------------------------------------------------
+  logic [`WIDTH-1:0] normal_in, bist_in, out;
+  logic             NbarT;
 
-  // DUT instantiation
-  multiplexer #(.WIDTH(WIDTH)) dut (
-    .normal_in(normal_in),
-    .bist_in(bist_in),
-    .NbarT(NbarT),
-    .out(out)
+  //------------------------------------------------------------------
+  // Instantiate DUT
+  //------------------------------------------------------------------
+  multiplexer #(.WIDTH(`WIDTH)) dut (
+    .normal_in (normal_in),
+    .bist_in   (bist_in),
+    .NbarT     (NbarT),
+    .out       (out)
   );
 
+  //------------------------------------------------------------------
+  // Utility: Pass/Fail reporter
+  //------------------------------------------------------------------
+  task automatic check_output(input logic [`WIDTH-1:0] exp_out);
+    if (out !== exp_out) begin
+      $display("FAIL\tTime=%0t\t Expected out:%h | Got:%h (NbarT=%0b)", $time, exp_out, out, NbarT);
+    end else begin
+      $display("PASS\tTime=%0t\t Expected out:%h | Got:%h (NbarT=%0b)", $time, exp_out, out, NbarT);
+    end
+  endtask
+
+  //------------------------------------------------------------------
+  // Stimulus (purely combinational)
+  //------------------------------------------------------------------
   initial begin
-    // Case 1: NbarT = 0 -> select normal_in
-    normal_in = 8'hA5; bist_in = 8'h5A; NbarT = 0;
-    #1;
-    assert(out == normal_in) else $error("FAIL: NbarT=0, expected out=normal_in (%h), got %h", normal_in, out);
+    //--------------------------------------------------------------
+    // 1) Basic functional cases
+    //--------------------------------------------------------------
+    normal_in = 8'hA5; bist_in = 8'h5A; NbarT = 0; #1;  check_output(normal_in);
+    NbarT     = 1;                       #1;  check_output(bist_in);
 
-    // Case 2: NbarT = 1 -> select bist_in
-    NbarT = 1;
-    #1;
-    assert(out == bist_in) else $error("FAIL: NbarT=1, expected out=bist_in (%h), got %h", bist_in, out);
+    //--------------------------------------------------------------
+    // 2) Edge values (all 0s / all 1s)
+    //--------------------------------------------------------------
+    normal_in = 8'h00; bist_in = 8'hFF; NbarT = 0; #1; check_output(8'h00);
+    NbarT     = 1;                     #1; check_output(8'hFF);
 
-    // Case 3: All 0s and 1s edge case
-    normal_in = 8'h00; bist_in = 8'hFF;
-    NbarT = 0; #1;
-    assert(out == 8'h00) else $error("FAIL: NbarT=0, expected out=00");
-
-    NbarT = 1; #1;
-    assert(out == 8'hFF) else $error("FAIL: NbarT=1, expected out=FF");
-
-    // Case 4: Random patterns
-    repeat (5) begin
-      normal_in = $random;
-      bist_in   = $random;
-      NbarT     = $random % 2;
+    //--------------------------------------------------------------
+    // 3) Random pattern trials
+    //--------------------------------------------------------------
+    repeat (10) begin
+      void'(std::randomize(normal_in));
+      void'(std::randomize(bist_in));
+      void'(std::randomize(NbarT));
       #1;
       if (NbarT)
-        assert(out == bist_in) else $error("FAIL: NbarT=1, expected out=bist_in");
+        check_output(bist_in);
       else
-        assert(out == normal_in) else $error("FAIL: NbarT=0, expected out=normal_in");
+        check_output(normal_in);
     end
 
-    $display("All multiplexer tests passed.");
+    $display("All multiplexer tests completed.");
     $finish;
   end
 endmodule

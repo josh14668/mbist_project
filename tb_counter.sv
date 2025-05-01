@@ -1,62 +1,101 @@
-`timescale 1ns/1ps
-
 module tb_counter;
-  parameter length = 10;
+  `define LENGTH 10
 
-  logic clk, ld, u_d, cen;
-  logic [length-1:0] d_in;
-  logic [length-1:0] q;
-  logic cout;
+  //------------------------------------------------------------------
+  // DUT interface signals
+  //------------------------------------------------------------------
+  logic [`LENGTH-1:0] d_in, q;
+  logic               clk, ld, u_d, cen, cout;
+  logic [`LENGTH-1:0] count;
 
-  // DUT instantiation
-  counter #(.length(length)) dut (
-    .d_in(d_in),
-    .clk(clk),
-    .ld(ld),
-    .u_d(u_d),
-    .cen(cen),
-    .q(q),
-    .cout(cout)
-  );
+  // Instantiate DUT
+  counter #(.LENGTH(`LENGTH)) dut (.*);
 
-  // Clock generation
+  //------------------------------------------------------------------
+  // Utility: PASS / FAIL reporter
+  //------------------------------------------------------------------
+  task automatic check_output(input logic exp_cout);
+    if (q !== count || cout !== exp_cout) begin
+      $display("FAIL\tT=%0t\tExp q:%b cout:%b | Got q:%b cout:%b", $time, count, exp_cout, q, cout);
+    end else begin
+      $display("PASS\tT=%0t\tExp q:%b cout:%b | Got q:%b cout:%b", $time, count, exp_cout, q, cout);
+    end
+  endtask
+
+  //------------------------------------------------------------------
+  // Clock
+  //------------------------------------------------------------------
   initial clk = 0;
-  always #5 clk = ~clk;
+  always   #5 clk = ~clk;   // 100 MHz
 
-  logic [length:0] temp_ref;
-
+  //------------------------------------------------------------------
+  // Stimulus
+  //------------------------------------------------------------------
   initial begin
-    // Reset state
-    ld = 0; u_d = 0; cen = 0; d_in = '0;
+    //--------------------------------------------------------------
+    // Reset / Init
+    //--------------------------------------------------------------
+    ld = 0; d_in = '0; cen = 0; u_d = 0; count = '0;
+
+    //--------------------------------------------------------------
+    // 0) Random LOAD while cen = 1
+    //--------------------------------------------------------------
+    #4; cen = 1; ld = 1; void'(std::randomize(count)); d_in = count;
+    #2  check_output(1'b0);
+
+    //--------------------------------------------------------------
+    // 1) Hold with cen = 0
+    //--------------------------------------------------------------
+    cen = 0; void'(std::randomize(d_in)); #10 check_output(1'b0);
+
+    //--------------------------------------------------------------
+    // 2) Release ld, still held (cen = 0)
+    //--------------------------------------------------------------
+    ld = 0; #10 check_output(1'b0);
+
+    //--------------------------------------------------------------
+    // 3) Single INC, then DEC
+    //--------------------------------------------------------------
+    cen  = 1; u_d = 1; count = count + 1; #10 check_output(1'b0);
+    u_d  = 0; count = count - 1; #10 check_output(1'b0);
+
+    //--------------------------------------------------------------
+    // 4) Under‑flow wrap (already in original TB)
+    //--------------------------------------------------------------
+    ld = 1; count = '0; d_in = count; #10 check_output(1'b0);
+    u_d = 0; ld = 0; count = count - 1; #10 check_output(1'b1);
+    u_d = 1; count = count + 1; #10 check_output(1'b1);
+    count = count + 1;          #10 check_output(1'b0);
+
+    //--------------------------------------------------------------
+    // 5) ***NEW*** Overflow wrap and clear
+    //--------------------------------------------------------------
+    // 5a) Load max value
+    ld   = 1; count = {`LENGTH{1'b1}}; d_in = count; #10 check_output(1'b0);
+    // 5b) Increment to wrap -> expect cout pulse
+    ld   = 0; u_d = 1; count = '0; #10 check_output(1'b1);
+    // 5c) Increment again -> cout must clear
+    count = count + 1;           #10 check_output(1'b0);
+
+    //--------------------------------------------------------------
+    // 6) Disable counting, hold outputs
+    //--------------------------------------------------------------
+    cen = 0; u_d = 1;  @(posedge clk); check_output(1'b0);
+    u_d = 0;            @(posedge clk); check_output(1'b0);
+
+    //--------------------------------------------------------------
+    // 7) Load with cen = 0 (should be ignored)
+    //--------------------------------------------------------------
+    ld = 1; d_in = 10'd123; @(posedge clk); check_output(1'b0);
+
+    //--------------------------------------------------------------
+    // 8) Re‑enable and finish
+    //--------------------------------------------------------------
+    ld = 0; cen = 1; u_d = 0; // down‑count one step
+    count = count - 1;            // advance reference before edge
     @(posedge clk);
+    check_output(1'b0);
 
-    // Load a value and check
-    ld = 1; cen = 1; d_in = 10'd512;
-    @(posedge clk);
-    ld = 0;
-    temp_ref = {1'b0, d_in};
-    if (q != d_in) $error("FAIL: load mismatch q=%0d, d_in=%0d", q, d_in);
-    if (cout != 0) $error("FAIL: cout should be 0 on load");
-
-    // Count up to overflow
-    repeat (3) begin
-      temp_ref = temp_ref + 1;
-      u_d = 1; cen = 1;
-      @(posedge clk);
-      if (q != temp_ref[length-1:0]) $error("FAIL: up-count mismatch");
-      if (cout != temp_ref[length])  $error("FAIL: overflow flag incorrect");
-    end
-
-    // Count down to underflow
-    repeat (4) begin
-      temp_ref = temp_ref - 1;
-      u_d = 0; cen = 1;
-      @(posedge clk);
-      if (q != temp_ref[length-1:0]) $error("FAIL: down-count mismatch");
-      if (cout != temp_ref[length])  $error("FAIL: underflow flag incorrect");
-    end
-
-    $display("All tests completed for 11-bit counter overflow tracking.");
-    $finish;
+    #10 $finish;
   end
 endmodule
